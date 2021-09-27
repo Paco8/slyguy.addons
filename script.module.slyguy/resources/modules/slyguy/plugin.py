@@ -519,6 +519,9 @@ class Item(gui.Item):
         quality = kwargs.get(QUALITY_TAG, self.quality)
         is_live = ROUTE_LIVE_TAG in kwargs
 
+        if settings.getBool('use_ttml2ssa', False) and self.inputstream.manifest_type == 'hls':
+            self._add_subtitles()
+
         if quality is None:
             quality = settings.getEnum('default_quality', QUALITY_TYPES, default=QUALITY_ASK)
             if quality == QUALITY_CUSTOM:
@@ -557,6 +560,62 @@ class Item(gui.Item):
             xbmcplugin.setResolvedUrl(handle, True, li)
         else:
             xbmc.Player().play(self.path, li)
+
+    def _add_subtitles(self):
+        log.debug("***** path: {}".format(self.path))
+        log.debug("***** profile path: {}".format(ADDON_PROFILE))
+
+        from ttml2ssa import Ttml2SsaAddon
+        ttml = Ttml2SsaAddon()
+        subtype = ttml.subtitle_type()
+        language_list = [x.strip().lower() for x in settings.get('subs_whitelist', '').split(',') if x]
+        allow_forced = settings.getBool('subs_forced', True)
+        allow_non_forced = settings.getBool('subs_non_forced', True)
+        log.debug("***** language_list: {}".format(language_list))
+        log.debug("***** allow_forced: {} allow_non_forced: {}".format(allow_forced, allow_non_forced))
+        sub_list = ttml.get_subtitle_list_from_m3u8_url(self.path, language_list, allow_forced, allow_non_forced)
+        log.debug("***** sub_list: {}".format(sub_list))
+
+        """ This code downloads all subtitles and adds them to the list (slow) """
+        """
+        import os
+        output_folder = ADDON_PROFILE + 'subtitles' + os.sep
+        if not os.path.exists(os.path.dirname(output_folder)):
+            os.makedirs(os.path.dirname(output_folder))
+
+        log.debug("***** output_folder: {}".format(output_folder))
+        self.subtitles = []
+        for sub in sub_list:
+            vtt, offset = ttml.download_m3u8_disney(sub['url'])
+            ttml.subtitle_language = sub['lang']
+            ttml.shift = offset
+            ttml.parse_vtt_from_string(vtt)
+            filename = output_folder + sub['filename']
+            if subtype != 'srt':
+                filename_ssa = filename + '.ssa'
+                ttml.write2file(filename_ssa)
+                self.subtitles.append([filename_ssa, sub['lang']])
+            if subtype != 'ssa':
+                filename_srt = filename
+                if (subtype == 'both'): filename_srt += '.SRT'
+                filename_srt += '.srt'
+                ttml.write2file(filename_srt)
+                self.subtitles.append([filename_srt, sub['lang']])
+        """
+
+        """ This code uses a proxy """
+        self.subtitles = []
+        def append_sub(url, lang, forced, extension, tag=''):
+            url_extension = url.split("/")[-1:][0].split(".")[-1:][0]
+            self.subtitles.append([url, lang+tag, 'text/' + url_extension, forced, extension])
+
+        for sub in sub_list:
+            if subtype != 'srt':
+                append_sub(sub['url'], sub['lang'], sub['forced'], 'ssa')
+            if subtype != 'ssa':
+                append_sub(sub['url'], sub['lang'], sub['forced'], 'srt', '.SRT' if subtype == 'both' else '')
+
+        log.debug("***** subtitles: {}".format(self.subtitles))
 
 #Plugin.Folder()
 class Folder(object):

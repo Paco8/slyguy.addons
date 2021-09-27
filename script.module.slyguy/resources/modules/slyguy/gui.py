@@ -367,7 +367,7 @@ class Item(object):
         else:
             self.inputstream = None
 
-        def make_sub(url, language='unk', mimetype='', forced=False):
+        def make_sub(url, language='unk', mimetype='', forced=False, extension='srt'):
             if not url.lower().startswith('http') and not url.lower().startswith('plugin://'):
                 return url
 
@@ -386,7 +386,13 @@ class Item(object):
                 proxy_data['middleware'][url] = {'type': MIDDLEWARE_CONVERT_SUB}
                 mimetype = 'text/vtt'
 
-            proxy_url = '{}{}.srt'.format(language, '.forced' if forced else '')
+            if mimetype == 'text/m3u8' and not url.lower().startswith('plugin://'):
+                orig_url = url
+                url = url +'?'+ extension
+                proxy_data['middleware'][url] = {'type': MIDDLEWARE_DOWNLOAD_SUB, 'url': orig_url, 'extension': extension, 'lang': language[0:2]}
+                mimetype = 'text/' + extension
+
+            proxy_url = '{}{}.{}'.format(language, '.forced' if forced else '', extension)
             proxy_data['path_subs'][proxy_url] = url
 
             return u'{}{}'.format(proxy_path, proxy_url)
@@ -414,6 +420,7 @@ class Item(object):
                 'audio_description': settings.getBool('audio_description', True),
                 'subs_forced': settings.getBool('subs_forced', True),
                 'subs_non_forced': settings.getBool('subs_non_forced', True),
+                'use_ttml2ssa': settings.getBool('use_ttml2ssa', False),
                 'verify_ssl': settings.getBool('verify_ssl', True),
                 'subtitles': [],
                 'path_subs': {},

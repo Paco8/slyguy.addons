@@ -80,6 +80,24 @@ def middleware_convert_sub(response, **kwargs):
         response.stream.content = data.encode('utf8')
         response.headers['content-type'] = 'text/vtt'
 
+def middleware_download_sub(response, url, extension, lang, **kwargs):
+    log.debug("**** middleware_download_sub: {} {} {}".format(url, extension, lang))
+
+    from ttml2ssa import Ttml2SsaAddon
+    ttml = Ttml2SsaAddon()
+    vtt, offset = ttml.download_m3u8_disney(url)
+    ttml.subtitle_language = lang
+    ttml.shift = offset
+    ttml.parse_vtt_from_string(vtt)
+
+    if extension == 'ssa':
+        res = ttml.generate_ssa()
+    else:
+        res = ttml.generate_srt()
+
+    response.stream.content = res.encode('utf8')
+    response.headers['content-type'] = 'text/vtt'
+
 def middleware_plugin(response, url, **kwargs):
     path = 'special://temp/proxy.middleware'
     real_path = xbmc.translatePath(path)
@@ -108,6 +126,7 @@ middlewares = {
     MIDDLEWARE_CONVERT_SUB: middleware_convert_sub,
     MIDDLEWARE_REGEX: middleware_regex,
     MIDDLEWARE_PLUGIN: middleware_plugin,
+    MIDDLEWARE_DOWNLOAD_SUB: middleware_download_sub,
 }
 
 class RequestHandler(BaseHTTPRequestHandler):
@@ -716,6 +735,10 @@ class RequestHandler(BaseHTTPRequestHandler):
         found_default_language = False
         has_default_subs = False
         found_default_subs = False
+
+        use_ttml2ssa = self._session.get('use_ttml2ssa', False)
+        if use_ttml2ssa:
+            m3u8 = re.sub(r'^#EXT-X-MEDIA:TYPE=SUBTITLES.*?$', '#DELETED', m3u8, flags=re.M)
 
         for line in m3u8.splitlines():
             if not line.strip():
