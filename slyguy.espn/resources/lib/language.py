@@ -16,10 +16,11 @@ class Language(BaseLanguage):
     RESET_HIDDEN       = 30012
     RESET_HIDDEN_OK    = 30013
     HIDE_CHANNEL       = 30014
-    SHOW_UPCOMING      = 30015
+    UPCOMING           = 30015
     SHOW_LIVE_SCORES   = 30016
     HIDE_ALT_LAN       = 30017
     STARTS             = 30018
     STARTED            = 30019
+    EVENT_WHITELIST    = 30020
 
 _ = Language()

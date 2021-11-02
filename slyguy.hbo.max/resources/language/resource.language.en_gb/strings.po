@@ -1,5 +1,18 @@
+# Language file for Kodi
+# Addon Name: HBO Max
+# Addon id: slyguy.hbo.max
+# Addon Provider: SlyGuy
 msgid ""
 msgstr ""
+"Project-Id-Version: Kodi Addons\n"
+"Report-Msgid-Bugs-To: https://github.com/matthuisman/slyguy.addons\n"
+"Last-Translator: matthuisman\n"
+"Language-Team: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Language: en\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
 msgctxt "#30003"
 msgid "Device ID"
@@ -55,9 +68,7 @@ msgctxt "#30016"
 msgid "Dolby Vision"
 msgstr ""
 
-msgctxt "#30017"
-msgid "Accessibility Audio"
-msgstr ""
+
 
 msgctxt "#30018"
 msgid "Dolby Digital (AC-3)"

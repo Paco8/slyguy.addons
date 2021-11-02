@@ -100,6 +100,23 @@ msgctxt "#30019"
 msgid "Check Kodi log for SlyGuy errors"
 msgstr ""
 
+msgctxt "#30020"
+msgid "Donor ID (Restart Kodi after changing)"
+msgstr ""
+
+msgctxt "#30021"
+msgid "Show News"
+msgstr ""
+
+
+msgctxt "#30023"
+msgid "Video view for all content"
+msgstr ""
+
+msgctxt "#30024"
+msgid "Folders for TV Show and Seasons"
+msgstr ""
+
 ## COMMON ##
 
 msgctxt "#32000"
@@ -195,7 +212,7 @@ msgid "{addon} - Error"
 msgstr ""
 
 msgctxt "#32021"
-msgid "Install Widevine CDM"
+msgid "(Re)install Widevine CDM"
 msgstr ""
 
 msgctxt "#32022"
@@ -612,7 +629,7 @@ msgid "Attempting to install Inputstream Adaptive from apt..."
 msgstr ""
 
 msgctxt "#32120"
-msgid "Folders for TV Show and Seasons"
+msgid "(Tv Show Folders setting moved to SlyGuy Common Settings)"
 msgstr ""
 
 msgctxt "#32121"
@@ -652,7 +669,7 @@ msgid "SlyGuy News"
 msgstr ""
 
 msgctxt "#32129"
-msgid "Video view for all content"
+msgid "(Video view setting moved to SlyGuy Common Settings)"
 msgstr ""
 
 msgctxt "#32130"
@@ -688,4 +705,20 @@ msgctxt "#32137"
 msgid "Your OS does not yet support this version of Widevine\n"
 "See [B]http://mjh.nz/widevine[/B] for more information\n"
 "Select Yes to install anyway"
+msgstr ""
+
+msgctxt "#32138"
+msgid "Donations"
+msgstr ""
+
+msgctxt "#32139"
+msgid "Look & Feel"
+msgstr ""
+
+msgctxt "#32140"
+msgid "Donate at [B]www.matthuisman.nz/donate[/B]"
+msgstr ""
+
+msgctxt "#32141"
+msgid "Season {number}"
 msgstr ""

@@ -215,29 +215,30 @@ class RequestHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         url = self._get_url('GET')
         response = self._proxy_request('GET', url)
+        manifest = self._session.get('manifest')
 
-        if self._session.get('redirecting') or not self._session.get('type') or not self._session.get('manifest') or int(response.headers.get('content-length', 0)) > 1000000:
+        if self._session.get('redirecting') or not self._session.get('type') or not manifest or int(response.headers.get('content-length', 0)) > 1000000:
             self._output_response(response)
             return
 
         parse = urlparse(self.path.lower())
 
         try:
-            if self._session.get('type') == 'm3u8' and (url == self._session['manifest'] or parse.path.endswith('.m3u') or parse.path.endswith('.m3u8')):
+            if self._session.get('type') == 'm3u8' and (url == manifest or parse.path.endswith('.m3u') or parse.path.endswith('.m3u8')):
                 self._parse_m3u8(response)
 
-            elif self._session.get('type') == 'mpd' and url == self._session['manifest']:
+            elif self._session.get('type') == 'mpd' and url == manifest:
+                self._session['manifest'] = None  #unset manifest url so isn't parsed again
                 self._parse_dash(response)
-                self._session['manifest'] = None  # unset manifest url so isn't parsed again
         except Exception as e:
             log.exception(e)
 
-            if type(e) != Exit and url == self._session['manifest']:
+            if type(e) == Exit:
+                response.status_code = 500
+                response.stream.content = str(e).encode('utf-8')
+                failed_playback()
+            elif url == manifest:
                 gui.error(_.QUALITY_PARSE_ERROR)
-
-            response.status_code = 500
-            response.stream.content = str(e).encode('utf-8')
-            failed_playback()
 
         self._output_response(response)
 
@@ -363,25 +364,25 @@ class RequestHandler(BaseHTTPRequestHandler):
             return None
 
     def _parse_dash(self, response):
-        if ADDON_DEV:
-            root = parseString(response.stream.content)
-            mpd = root.toprettyxml(encoding='utf-8')
-            mpd = b"\n".join([ll.rstrip() for ll in mpd.splitlines() if ll.strip()])
-            with open(xbmc.translatePath('special://temp/in.mpd'), 'wb') as f:
-                f.write(mpd)
-
-            start = time.time()
-
         data = response.stream.content.decode('utf8')
 
         ## SUPPORT NEW DOLBY FORMAT https://github.com/xbmc/inputstream.adaptive/pull/466
         data = data.replace('tag:dolby.com,2014:dash:audio_channel_configuration:2011', 'urn:dolby:dash:audio_channel_configuration:2011')
         ## SUPPORT EC-3 CHANNEL COUNT https://github.com/xbmc/inputstream.adaptive/pull/618
         data = data.replace('urn:mpeg:mpegB:cicp:ChannelConfiguration', 'urn:mpeg:dash:23003:3:audio_channel_configuration:2011')
+        data = data.replace('dvb:', '') #showmax mpd has dvb: namespace without declaration
 
         root = parseString(data.encode('utf8'))
-        mpd = root.getElementsByTagName("MPD")[0]
 
+        if ADDON_DEV:
+            pretty = root.toprettyxml(encoding='utf-8')
+            pretty = b"\n".join([ll.rstrip() for ll in pretty.splitlines() if ll.strip()])
+            with open(xbmc.translatePath('special://temp/in.mpd'), 'wb') as f:
+                f.write(pretty)
+
+            start = time.time()
+
+        mpd = root.getElementsByTagName("MPD")[0]
         mpd_attribs = list(mpd.attributes.keys())
 
         ## Remove publishTime PR: https://github.com/xbmc/inputstream.adaptive/pull/564
@@ -413,6 +414,7 @@ class RequestHandler(BaseHTTPRequestHandler):
 
         default_language = self._session.get('default_language', '')
         original_language = self._session.get('original_language', '')
+        audio_description = self._session.get('audio_description', True)
         subs_whitelist = [x.strip().lower() for x in self._session.get('subs_whitelist', '').split(',') if x]
 
         for period_index, period in enumerate(root.getElementsByTagName('Period')):
@@ -533,9 +535,17 @@ class RequestHandler(BaseHTTPRequestHandler):
         for elem in audio_sets:
             elem[2].appendChild(elem[1])
 
+        overwrite_subs = self._session.get('subtitles') or []
+
         ## Insert subtitles
-        if adap_parent:
-            for idx, subtitle in enumerate(self._session.get('subtitles') or []):
+        if overwrite_subs and adap_parent:
+            # remove all built-in subs
+            for adap_set in root.getElementsByTagName('AdaptationSet'):
+                if adap_set.getAttribute('contentType') == 'text':
+                    adap_set.parentNode.removeChild(adap_set)
+
+            # add our subs
+            for idx, subtitle in enumerate(overwrite_subs):
                 elem = root.createElement('AdaptationSet')
                 elem.setAttribute('contentType', 'text')
                 elem.setAttribute('mimeType', subtitle[0])
@@ -543,7 +553,9 @@ class RequestHandler(BaseHTTPRequestHandler):
                 elem.setAttribute('id', 'caption_{}'.format(idx))
                 #elem.setAttribute('original', 'true')
                 #elem.setAttribute('default', 'true')
-                #elem.setAttribute('impaired', 'true')
+
+                if subtitle[4] == 'impaired':
+                    elem.setAttribute('impaired', 'true')
 
                 if subtitle[3] == 'forced':
                     elem.setAttribute('forced', 'true')
@@ -564,14 +576,28 @@ class RequestHandler(BaseHTTPRequestHandler):
                 adap_parent.appendChild(elem)
         ##################
 
-        ## REMOVE SUBS
-        if subs_whitelist:
-            for adap_set in root.getElementsByTagName('AdaptationSet'):
-                if adap_set.getAttribute('contentType') == 'text':
-                    language = adap_set.getAttribute('lang')
-                    if not _lang_allowed(language.lower().strip(), subs_whitelist):
-                        adap_set.parentNode.removeChild(adap_set)
+        ## Fix up languages
+        for adap_set in root.getElementsByTagName('AdaptationSet'):
+            language = adap_set.getAttribute('lang')
+            _language = self._fix_language(language)
+            if _language:
+                adap_set.setAttribute('lang', _language)
+
+            if subs_whitelist and adap_set.getAttribute('contentType') == 'text':
+                if not _lang_allowed(language.lower().strip(), subs_whitelist):
+                    adap_set.parentNode.removeChild(adap_set)
+                    log.debug('Removed subtitle adapt set: {}'.format(adap_set.getAttribute('id')))
         ################
+
+        ## Remove audio_description
+        if not audio_description:
+            for row in audio_sets:
+                for elem in row[1].getElementsByTagName('Accessibility'):
+                    if elem.getAttribute('schemeIdUri') == 'urn:tva:metadata:cs:AudioPurposeCS:2007':
+                        row[2].removeChild(row[1])
+                        log.debug('Removed audio description adapt set: {}'.format(row[1].getAttribute('id')))
+                        break
+        ############
 
         ## Convert BaseURLS
         base_url_parents = []
@@ -666,6 +692,16 @@ class RequestHandler(BaseHTTPRequestHandler):
 
         response.stream.content = mpd
 
+    def _fix_language(self, language=None):
+        if not language:
+            return None
+
+        split = language.split('-')
+        if len(split) > 1 and split[1].lower() == split[0].lower():
+            return split[0]
+
+        return language
+
     def _parse_m3u8_sub(self, m3u8, url):
         lines = []
         segments = []
@@ -707,7 +743,7 @@ class RequestHandler(BaseHTTPRequestHandler):
 
         return '\n'.join(lines)
 
-    def _parse_m3u8_master(self, m3u8, url):
+    def _parse_m3u8_master(self, m3u8, manifest_url):
         def _process_media(line):
             attribs = {}
 
@@ -825,15 +861,12 @@ class RequestHandler(BaseHTTPRequestHandler):
             if default_language:
                 attribs['DEFAULT'] = 'YES' if lang.startswith(default_language) else 'NO'
 
-            # FIX es-ES > es / fr-FR > fr languages #
-            split = attribs.get('LANGUAGE','').split('-')
-            if len(split) > 1 and split[1].lower() == split[0].lower():
-                attribs['LANGUAGE'] = split[0]
-            #############
+            attribs['LANGUAGE'] = self._fix_language(attribs.get('LANGUAGE',''))
 
             new_line = '#EXT-X-MEDIA:' if attribs else ''
             for key in attribs:
-                new_line += u'{}="{}",'.format(key, attribs[key])
+                if attribs[key] is not None:
+                    new_line += u'{}="{}",'.format(key, attribs[key])
             new_lines.append(new_line)
 
         if not found_default_subs:
@@ -862,9 +895,12 @@ class RequestHandler(BaseHTTPRequestHandler):
             if default_subtitle:
                 attribs['DEFAULT'] = 'YES' if lang.startswith(default_subtitle) else 'NO'
 
+            attribs['LANGUAGE'] = self._fix_language(attribs.get('LANGUAGE',''))
+
             new_line = '#EXT-X-MEDIA:' if attribs else ''
             for key in attribs:
-                new_line += u'{}="{}",'.format(key, attribs[key])
+                if attribs[key] is not None:
+                    new_line += u'{}="{}",'.format(key, attribs[key])
             new_lines.append(new_line)
 
         selected = self._quality_select(streams)
@@ -963,7 +999,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         # some reason we get connection errors every so often when using a session. something to do with the socket
         for i in range(retries):
             try:
-                response = self._session['session'].request(method=method, url=url, headers=self._headers, data=self._post_data, allow_redirects=False, verify=self._session.get('verify_ssl', True), stream=True)
+                response = self._session['session'].request(method=method, url=url, headers=self._headers, data=self._post_data, allow_redirects=False, stream=True)
             except ConnectionError as e:
                 if 'Connection aborted' not in str(e) or i == retries-1:
                     log.exception(e)

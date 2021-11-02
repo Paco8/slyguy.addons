@@ -182,7 +182,7 @@ class Item(object):
     def __init__(self, id=None, label='', path=None, playable=False, info=None, context=None,
             headers=None, cookies=None, properties=None, is_folder=None, art=None, inputstream=None,
             video=None, audio=None, subtitles=None, use_proxy=True, specialsort=None, custom=None, proxy_data=None,
-            resume_from=None, force_resume=False):
+            resume_from=None, force_resume=False, dns_rewrites=None):
 
         self.id          = id
         self.label       = label
@@ -199,6 +199,7 @@ class Item(object):
         self.playable    = playable
         self.inputstream = inputstream
         self.proxy_data  = proxy_data or {}
+        self.dns_rewrites = dns_rewrites or {}
         self.mimetype    = None
         self._is_folder  = is_folder
         self.specialsort = specialsort #bottom, top
@@ -219,27 +220,18 @@ class Item(object):
     def is_folder(self, value):
         self._is_folder = value
 
-    def get_url_headers(self):
-        headers = {}
-        for key in self.headers:
-            headers[key.lower()] = self.headers[key]
-
-        if 'connection-timeout' not in headers:
-            headers['connection-timeout'] = settings.getInt('http_timeout', 30)
-
-        if 'verifypeer' not in headers and not settings.getBool('verify_ssl', True):
-            headers['verifypeer'] = 'false'
-
+    def get_url_headers(self, headers=None, cookies=None):
         string = ''
-        for key in self.headers:
-            string += u'{0}={1}&'.format(key, quote(u'{}'.format(self.headers[key]).encode('utf8')))
+        if headers:
+            for key in headers:
+                string += u'{0}={1}&'.format(key, quote(u'{}'.format(headers[key]).encode('utf8')))
 
-        if self.cookies:
+        if cookies:
             string += 'Cookie='
-            for key in self.cookies:
-                string += u'{0}%3D{1}; '.format(key, quote(u'{}'.format(self.cookies[key]).encode('utf8')))
+            for key in cookies:
+                string += u'{0}%3D{1}; '.format(key, quote(u'{}'.format(cookies[key]).encode('utf8')))
 
-        return string.strip('&')
+        return string.strip().strip('&')
 
     def get_li(self):
         proxy_path = settings.common_settings.get('_proxy_path')
@@ -252,19 +244,39 @@ class Item(object):
         if self.label:
             li.setLabel(self.label)
             if not (self.info.get('plot') or '').strip():
-                self.info['plot'] = self.label
+                self.info['plot'] = '[B][/B]'
 
             if not self.info.get('title'):
                 self.info['title'] = self.label
 
         if self.info:
-            if self.info.get('mediatype') in ('tvshow','season') and settings.getBool('show_series_folders', True):
+            if self.info.get('mediatype') in ('tvshow','season') and settings.common_settings.getBool('show_series_folders', False):
                 self.info.pop('mediatype')
 
             if self.info.get('mediatype') == 'movie':
                 self.info.pop('season', None)
                 self.info.pop('episode', None)
                 self.info.pop('tvshowtitle', None)
+
+            year = self.info.get('year') or ''
+            aired = self.info.get('aired') or ''
+            premiered = self.info.get('premiered') or ''
+            date_added = self.info.get('dateadded') or ''
+
+            if not aired and premiered:
+                self.info['aired'] = aired = premiered
+
+            if year and not aired:
+                self.info['aired'] = aired = '{}-01-01'.format(year)
+
+            if not premiered and aired:
+                self.info['premiered'] = premiered = aired
+
+            if not year and len(aired) >= 4:
+                self.info['year'] = year = aired[0:4]
+
+            if not date_added and aired:
+                self.info['dateadded'] = date_added = '{} 12:00:00'.format(aired)
 
             li.setInfo('video', self.info)
 
@@ -305,6 +317,7 @@ class Item(object):
             li.addContextMenuItems(self.context)
 
         if self.resume_from is not None:
+            # Setting this on Kodi 18 or below removes all list item data (fixed in 19)
             self.properties['ResumeTime'] = self.resume_from
             self.properties['TotalTime'] = self.resume_from
 
@@ -315,7 +328,7 @@ class Item(object):
         for key in self.properties:
             li.setProperty(key, u'{}'.format(self.properties[key]))
 
-        headers = self.get_url_headers()
+        headers = self.get_url_headers(self.headers, self.cookies)
         mimetype = self.mimetype
 
         def get_url(url):
@@ -345,7 +358,7 @@ class Item(object):
                 license_url = self.inputstream.license_key
                 li.setProperty('{}.license_key'.format(self.inputstream.addon_id), u'{url}|Content-Type={content_type}&{headers}|{challenge}|{response}'.format(
                     url = get_url(self.inputstream.license_key),
-                    headers = headers,
+                    headers = self.get_url_headers(self.inputstream.license_headers) if self.inputstream.license_headers else headers,
                     content_type = self.inputstream.content_type,
                     challenge = self.inputstream.challenge,
                     response = self.inputstream.response,
@@ -367,7 +380,7 @@ class Item(object):
         else:
             self.inputstream = None
 
-        def make_sub(url, language='unk', mimetype='', forced=False, extension='srt'):
+        def make_sub(url, language='unk', mimetype='', forced=False, impaired=False, extension='srt'):
             if not url.lower().startswith('http') and not url.lower().startswith('plugin://'):
                 return url
 
@@ -378,7 +391,7 @@ class Item(object):
                     proxy_data['middleware'][url] = {'type': MIDDLEWARE_CONVERT_SUB}
                     mimetype = 'text/vtt'
 
-                proxy_data['subtitles'].append([mimetype, language, url, 'forced' if forced else None])
+                proxy_data['subtitles'].append([mimetype, language, url, 'forced' if forced else None, 'impaired' if impaired else None])
                 return None
 
             ## only srt or webvtt (text/) supported
@@ -421,14 +434,13 @@ class Item(object):
                 'subs_forced': settings.getBool('subs_forced', True),
                 'subs_non_forced': settings.getBool('subs_non_forced', True),
                 'use_ttml2ssa': settings.getBool('use_ttml2ssa', False),
-                'verify_ssl': settings.getBool('verify_ssl', True),
                 'subtitles': [],
                 'path_subs': {},
                 'addon_id': ADDON_ID,
                 'quality': QUALITY_DISABLED,
                 'middleware': {},
                 'type': None,
-                'dns_rewrites': get_dns_rewrites(),
+                'dns_rewrites': get_dns_rewrites(self.dns_rewrites),
             }
 
             if mimetype == 'application/vnd.apple.mpegurl':

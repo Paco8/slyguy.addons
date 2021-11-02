@@ -91,9 +91,9 @@ class HLS(InputstreamItem):
         self.live  = live
 
     def do_check(self):
-        legacy   = settings.getBool('use_ia_hls', False)
+        legacy = settings.getBool('use_ia_hls', False)
         hls_live = settings.getBool('use_ia_hls_live', legacy)
-        hls_vod  = settings.getBool('use_ia_hls_vod', legacy)
+        hls_vod = settings.getBool('use_ia_hls_vod', legacy)
         return (self.force or (self.live and hls_live) or (not self.live and hls_vod)) and require_version(self.minversion, required=self.force)
 
 class MPD(InputstreamItem):
@@ -116,7 +116,7 @@ class Playready(InputstreamItem):
 class Widevine(InputstreamItem):
     license_type = 'com.widevine.alpha'
 
-    def __init__(self, license_key=None, content_type='application/octet-stream', challenge='R{SSM}', response='', manifest_type='mpd', mimetype='application/dash+xml', license_data=None, wv_secure=False, **kwargs):
+    def __init__(self, license_key=None, content_type='application/octet-stream', challenge='R{SSM}', response='', manifest_type='mpd', mimetype='application/dash+xml', license_data=None, license_headers=None, wv_secure=False, **kwargs):
         super(Widevine, self).__init__(**kwargs)
         self.license_key = license_key
         self.content_type = content_type
@@ -126,6 +126,7 @@ class Widevine(InputstreamItem):
         self.mimetype = mimetype
         self.license_data = license_data
         self.wv_secure = wv_secure
+        self.license_headers = license_headers
 
     def do_check(self):
         return install_widevine()

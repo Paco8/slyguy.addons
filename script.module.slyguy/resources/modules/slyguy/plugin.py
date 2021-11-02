@@ -538,23 +538,22 @@ class Item(gui.Item):
         li = self.get_li()
         handle = _handle()
 
+        play_data = {
+            'playing_file': self.path,
+            'next': {'time': 0, 'next_file': None},
+            'skips': self.play_skips or [],
+            'callback': {'type': 'interval', 'interval': 0, 'callback': None},
+        }
+
         if self.play_next:
-            data = {'playing_file': self.path, 'time': 0, 'next_file': None, 'show_dialog': True}
-            data.update(self.play_next)
-
-            if data['next_file']:
-                data['next_file'] = router.add_url_args(data['next_file'], _play=1)
-
-            set_kodi_string('_slyguy_play_next', json.dumps(data))
-
-        if self.play_skips:
-            data = {'playing_file': self.path, 'skips': self.play_skips}
-            set_kodi_string('_slyguy_play_skips', json.dumps(data))
+            play_data['next'].update(self.play_next)
+            if play_data['next']['next_file']:
+                play_data['next']['next_file'] = router.add_url_args(play_data['next']['next_file'], _play=1)
 
         if self.callback:
-            data = {'type': 'interval', 'playing_file': self.path, 'interval': 0, 'callback': None}
-            data.update(self.callback)
-            set_kodi_string('_slyguy_play_callback', json.dumps(data))
+            play_data['callback'].update(self.callback)
+
+        set_kodi_string('_slyguy_play_data', json.dumps(play_data))
 
         if handle > 0:
             xbmcplugin.setResolvedUrl(handle, True, li)
@@ -607,7 +606,8 @@ class Item(gui.Item):
         self.subtitles = []
         def append_sub(url, lang, forced, extension, tag=''):
             url_extension = url.split("/")[-1:][0].split(".")[-1:][0]
-            self.subtitles.append([url, lang+tag, 'text/' + url_extension, forced, extension])
+            impaired=False
+            self.subtitles.append([url, lang+tag, 'text/' + url_extension, forced, impaired, extension])
 
         for sub in sub_list:
             if subtype != 'srt':
@@ -682,7 +682,7 @@ class Folder(object):
         if self.content == 'AUTO':
             self.content = 'videos'
 
-            if not settings.getBool('video_folder_content', True) and item_types:
+            if not settings.common_settings.getBool('video_folder_content', False) and item_types:
                 type_map = {
                     'movie': 'movies',
                     'tvshow': 'tvshows',
@@ -700,7 +700,7 @@ class Folder(object):
         if self.title: xbmcplugin.setPluginCategory(handle, self.title)
 
         if not self.sort_methods:
-            self.sort_methods = [xbmcplugin.SORT_METHOD_EPISODE, xbmcplugin.SORT_METHOD_UNSORTED, xbmcplugin.SORT_METHOD_LABEL]
+            self.sort_methods = [xbmcplugin.SORT_METHOD_EPISODE, xbmcplugin.SORT_METHOD_UNSORTED, xbmcplugin.SORT_METHOD_LABEL, xbmcplugin.SORT_METHOD_VIDEO_YEAR, xbmcplugin.SORT_METHOD_DATEADDED, xbmcplugin.SORT_METHOD_PLAYCOUNT]
             if not ep_sort:
                 self.sort_methods.pop(0)
 
@@ -746,13 +746,6 @@ def process_news():
 
     try:
         news = json.loads(news)
-        _time = time.time()
-
-        if _time > news.get('timestamp', _time) + NEWS_MAX_TIME:
-            log.debug('news is too old')
-            settings.common_settings.set('_news', '')
-            return
-
         if news.get('show_in') and ADDON_ID.lower() not in [x.lower() for x in news['show_in'].split(',')]:
             return
 

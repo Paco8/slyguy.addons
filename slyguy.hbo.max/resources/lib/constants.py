@@ -1,6 +1,6 @@
 DEVICE_MODEL = 'androidtv'
 
-VERSION = '50.49.0.0'
+VERSION = '100.35.0.280'
 
 HEADERS = {
     'User-Agent': 'Dalvik/2.1.0 (Linux; U; Android 8.1.0; SHIELD Android TV Build/LMY47D)',
@@ -19,3 +19,4 @@ GUEST_AUTH = 'https://oauth.api.hbo.com/auth/tokens'
 UPLOAD_AVATAR = '/accounts/user-images/profile/{image_id}?format=png&size=320x320&authorization=Bearer {token}'
 CHARACTER_AVATAR = '/images/{image_id}/avatar?size=320x320'
 DEVICE_CODE_URL = 'https://hbomax.com/tvsignin'
+WATCHED_PERCENT = 95
