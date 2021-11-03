@@ -97,6 +97,14 @@ def progressbg(message='', heading=None, percent=0):
     return dialog
 
 @contextmanager
+def busy():
+    xbmc.executebuiltin('ActivateWindow(busydialognocancel)')
+    try:
+        yield
+    finally:
+        xbmc.executebuiltin('Dialog.Close(busydialognocancel)')
+
+@contextmanager
 def progress(message='', heading=None, percent=0, background=False):
     dialog = Progress(message=message, heading=heading, percent=percent, background=background)
 
@@ -319,7 +327,7 @@ class Item(object):
         if self.resume_from is not None:
             # Setting this on Kodi 18 or below removes all list item data (fixed in 19)
             self.properties['ResumeTime'] = self.resume_from
-            self.properties['TotalTime'] = self.resume_from
+            self.properties['TotalTime'] = 1
 
         if not self.force_resume and len(sys.argv) > 3 and sys.argv[3].lower() == 'resume:true':
             self.properties.pop('ResumeTime', None)

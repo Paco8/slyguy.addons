@@ -19,7 +19,7 @@ from pycaption import detect_format, WebVTTWriter
 from slyguy import settings, gui, inputstream
 from slyguy.log import log
 from slyguy.constants import *
-from slyguy.util import check_port, remove_file, get_kodi_string, set_kodi_string, fix_url, run_plugin
+from slyguy.util import check_port, remove_file, get_kodi_string, set_kodi_string, fix_url, run_plugin, lang_allowed, fix_language
 from slyguy.plugin import failed_playback
 from slyguy.exceptions import Exit
 from slyguy.session import RawSession
@@ -55,16 +55,6 @@ PROXY_GLOBAL = {
     'last_qualities': [],
     'session': {},
 }
-
-def _lang_allowed(lang, lang_list):
-    for _lang in lang_list:
-        if not _lang:
-            continue
-
-        if lang.startswith(_lang):
-            return True
-
-    return False
 
 def middleware_regex(response, pattern, **kwargs):
     data = response.stream.content.decode('utf8')
@@ -412,10 +402,22 @@ class RequestHandler(BaseHTTPRequestHandler):
         streams, all_streams = [], []
         adap_parent = None
 
-        default_language = self._session.get('default_language', '')
-        original_language = self._session.get('original_language', '')
         audio_description = self._session.get('audio_description', True)
+        audio_whitelist = [x.strip().lower() for x in self._session.get('audio_whitelist', '').split(',') if x]
         subs_whitelist = [x.strip().lower() for x in self._session.get('subs_whitelist', '').split(',') if x]
+        original_language = self._session.get('original_language', '')
+        default_language = self._session.get('default_language', '').lower().strip()
+        default_subtitle = self._session.get('default_subtitle', '').lower().strip()
+
+        if default_language == 'original':
+            default_language = original_language
+
+        if default_subtitle == 'original':
+            default_subtitle = original_language
+
+        if audio_whitelist:
+            audio_whitelist.append(original_language)
+            audio_whitelist.append(default_language)
 
         for period_index, period in enumerate(root.getElementsByTagName('Period')):
             rep_index = 0
@@ -448,10 +450,10 @@ class RequestHandler(BaseHTTPRequestHandler):
                         is_trick = True
 
                     if 'audio' in attribs.get('mimeType', ''):
-                        if default_language and attribs.get('lang').lower().split('-')[0] == default_language.lower().split('-')[0]:
+                        if lang_allowed(attribs.get('lang'), [default_language]):
                             adap_set.setAttribute('default', 'true')
 
-                        if original_language and attribs.get('lang').lower().split('-')[0] == original_language.lower().split('-')[0]:
+                        if lang_allowed(attribs.get('lang'), [original_language]):
                             adap_set.setAttribute('original', 'true')
 
                         is_atmos = False
@@ -579,12 +581,19 @@ class RequestHandler(BaseHTTPRequestHandler):
         ## Fix up languages
         for adap_set in root.getElementsByTagName('AdaptationSet'):
             language = adap_set.getAttribute('lang')
-            _language = self._fix_language(language)
-            if _language:
-                adap_set.setAttribute('lang', _language)
+            if language:
+                adap_set.setAttribute('lang', fix_language(language))
 
-            if subs_whitelist and adap_set.getAttribute('contentType') == 'text':
-                if not _lang_allowed(language.lower().strip(), subs_whitelist):
+            if adap_set.getAttribute('contentType') == 'audio':
+                if not lang_allowed(language, audio_whitelist):
+                    adap_set.parentNode.removeChild(adap_set)
+                    log.debug('Removed audio adapt set: {}'.format(adap_set.getAttribute('id')))
+
+            if adap_set.getAttribute('contentType') == 'text':
+                if lang_allowed(language, [default_subtitle]):
+                    adap_set.setAttribute('default', 'true')
+
+                if not lang_allowed(language, subs_whitelist):
                     adap_set.parentNode.removeChild(adap_set)
                     log.debug('Removed subtitle adapt set: {}'.format(adap_set.getAttribute('id')))
         ################
@@ -692,16 +701,6 @@ class RequestHandler(BaseHTTPRequestHandler):
 
         response.stream.content = mpd
 
-    def _fix_language(self, language=None):
-        if not language:
-            return None
-
-        split = language.split('-')
-        if len(split) > 1 and split[1].lower() == split[0].lower():
-            return split[0]
-
-        return language
-
     def _parse_m3u8_sub(self, m3u8, url):
         lines = []
         segments = []
@@ -760,6 +759,12 @@ class RequestHandler(BaseHTTPRequestHandler):
         original_language = self._session.get('original_language', '').lower().strip()
         default_language = self._session.get('default_language', '').lower().strip()
         default_subtitle = self._session.get('default_subtitle', '').lower().strip()
+
+        if default_language == 'original':
+            default_language = original_language
+
+        if default_subtitle == 'original':
+            default_subtitle = original_language
 
         stream_inf = None
         streams, all_streams, urls, metas = [], [], [], []
@@ -848,7 +853,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         for attribs in audio:
             lang = attribs.get('LANGUAGE','').lower().strip()
 
-            if audio_whitelist and not _lang_allowed(lang, audio_whitelist):
+            if not lang_allowed(lang, audio_whitelist):
                 continue
 
             if not audio_description and attribs.get('CHARACTERISTICS','').lower() == 'public.accessibility.describes-video':
@@ -861,7 +866,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             if default_language:
                 attribs['DEFAULT'] = 'YES' if lang.startswith(default_language) else 'NO'
 
-            attribs['LANGUAGE'] = self._fix_language(attribs.get('LANGUAGE',''))
+            attribs['LANGUAGE'] = fix_language(attribs.get('LANGUAGE',''))
 
             new_line = '#EXT-X-MEDIA:' if attribs else ''
             for key in attribs:
@@ -883,7 +888,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         for attribs in subtitles:
             lang = attribs.get('LANGUAGE','').lower().strip()
 
-            if subs_whitelist and not _lang_allowed(lang, subs_whitelist):
+            if not lang_allowed(lang, subs_whitelist):
                 continue
 
             if not subs_forced and attribs.get('FORCED','').upper() == 'YES':
@@ -895,7 +900,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             if default_subtitle:
                 attribs['DEFAULT'] = 'YES' if lang.startswith(default_subtitle) else 'NO'
 
-            attribs['LANGUAGE'] = self._fix_language(attribs.get('LANGUAGE',''))
+            attribs['LANGUAGE'] = fix_language(attribs.get('LANGUAGE',''))
 
             new_line = '#EXT-X-MEDIA:' if attribs else ''
             for key in attribs:

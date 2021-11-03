@@ -1,14 +1,13 @@
 import uuid
 from time import time
 
-import arrow
 from kodi_six import xbmc
 
 from slyguy import userdata, settings, mem_cache, gui
 from slyguy.session import Session
 from slyguy.exceptions import Error
 from slyguy.log import log
-from slyguy.util import get_system_arch
+from slyguy.util import get_system_arch, lang_allowed
 
 from .constants import *
 from .language import Language, _
@@ -120,11 +119,11 @@ class API(object):
 
     @mem_cache.cached(60*30)
     def _client_config(self):
-        serial = self._guest_login()
+        self._guest_login()
 
         payload = {
             'contract': 'hadron:1.1.2.0',
-            'preferredLanguages': [self._get_language(), 'en-US'],
+            'preferredLanguages': [DEFAULT_LANGUAGE],
         }
 
         data = self._session.post(CONFIG_URL, json=payload).json()
@@ -162,6 +161,7 @@ class API(object):
         }
 
         self._oauth_token(payload)
+        mem_cache.empty()
 
     def device_login(self, serial, code):
         payload = {
@@ -281,20 +281,40 @@ class API(object):
         return data
 
     def _headwaiter(self):
+        config = self._client_config()
+
         headwaiter = ''
-        for key in sorted(self._client_config()['payloadValues']):
-            headwaiter += '{}:{},'.format(key, self._client_config()['payloadValues'][key])
+        for key in sorted(config['payloadValues']):
+            headwaiter += '{}:{},'.format(key, config['payloadValues'][key])
 
         return headwaiter.rstrip(',')
 
+    def get_languages(self):
+        return [x for x in self._session.get(self.url('gateway', '/sessions/v1/enabledLanguages')).json() if x.get('disabledForCurrentRegion') != True]
+
+    @mem_cache.cached(60*30, key='language')
     def _get_language(self):
-        return xbmc.getLanguage(xbmc.ISO_639_1, True)
+        language = userdata.get('language', 'auto')
+        if language == 'auto':
+            language = xbmc.getLanguage(xbmc.ISO_639_1, True).replace('no-', 'nb-')
+            log.debug('Using Kodi language: {}'.format(language))
+
+        available = [x['code'] for x in self.get_languages()]
+        log.debug('Available languages: {}'.format(available))
+
+        if lang_allowed(language, available):
+            log.debug('Selected language: {}'.format(language))
+            return language
+
+        log.debug('Using default language: {}'.format(DEFAULT_LANGUAGE))
+        return DEFAULT_LANGUAGE
 
     def express_content(self, slug, tab=None):
         self._refresh_token()
 
         headers = {
             'x-hbo-headwaiter': self._headwaiter(),
+            'accept-language': self._get_language(),
         }
         params = {
             'language': self._get_language(),
